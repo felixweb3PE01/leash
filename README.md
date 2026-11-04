@@ -1,43 +1,73 @@
 # Leash
 
-A spending guard for AI agents that hold money. Leash sits between an agent and its wallet and enforces rules (per-transaction cap, daily cap, receiver allowlist/blocklist) before any payment is sent. Every decision is logged with a reason.
+**Give an AI agent money without giving it the keys.** Leash is a spending guard for AI agents on NEAR. The agent can only pay through a guard contract that enforces limits on-chain, and a counterparty checker vets every receiver before the agent signs.
 
-**Track:** AI Security & Defense (`security`), NEAR HACKATHON 2026.
+Built for NEAR HACKATHON 2026, track `security` (AI Security & Defense).
 
-## Problem
+## The problem
 
-An AI agent with wallet access can overspend through a bug, a prompt injection, or a scam. Giving it a key means giving it everything. Leash gives the agent money without giving it unlimited authority.
+An agent with a wallet key can overspend through a bug, a prompt injection, or a scam. If the key is a normal key, a hijacked agent can drain the account. A check that lives only inside the agent's own code is bypassed the moment the agent is compromised.
 
-## Status (honest)
+## How it works (three layers)
 
-| Part | State |
+1. **Counterparty checker (agent side).** Before signing, the wrapper scores the receiver and returns `allow`, `warn` or `block` with reasons. On `block` it refuses to sign. On `warn` it asks a human (an unattended agent treats `warn` as a refusal).
+   Signals used: whether the account exists, whether it is a contract, evidenced reports on the shared blocklist, and prior successful payments from this agent to the receiver.
+2. **Guard contract (on-chain, TypeScript / near-sdk-js).** Holds the funds. The agent calls `pay`; the contract enforces a per-transaction cap, a rolling 24h cap, an owner allowlist and blocklist, and the community blocklist (2 reports with evidence blocks an account). Every decision, allowed or denied, is logged on-chain.
+3. **Function-call key.** The agent account holds only a function-call access key restricted to `guard.pay`. It cannot transfer NEAR itself or add keys, so skipping the contract is rejected by the NEAR protocol.
+
+Even if layer 1 is bypassed, layers 2 and 3 still stop the attack.
+
+## Live testnet deployment
+
+| Item | Account |
 | --- | --- |
-| Policy engine (caps, allowlist, blocklist, rolling 24h window) | Done, 7 tests passing |
-| Simulated agent demo (offline) | Done |
-| NEAR testnet payments through the guard | In progress |
-| NEAR function call key scoped to the guard | Planned |
+| Guard contract | `guard-leash7.testnet` |
+| Owner | `felix-leash7.testnet` |
+| Agent | `agent-leash7.testnet` |
+| Approved merchant | `merchant-leash7.testnet` |
 
-NEAR integration is built during the hackathon window (2026-11-01 to 2026-11-14). Nothing here is pre-hackathon code.
+Limits at deployment: 5 NEAR per payment, 10 NEAR per rolling 24h.
 
-## Try it
+## Try it (do X, see Y)
 
-Requires Python 3.10+.
+Requires Node 22+.
 
-1. `cd leash && pip install pytest`
-2. `python -m pytest -q` -> see `7 passed`.
-3. `python demo.py` -> see 3 payments ALLOWED and 4 BLOCKED, each with a reason (not on allowlist, over per-transaction cap, blocklisted, over daily cap).
-4. Edit `policy.json` (for example set `max_per_tx` to `1.0`) and rerun `python demo.py` -> see more payments blocked.
-5. `cat decisions.log` -> see one JSON line per decision.
+**A. Run all tests offline (no accounts needed)**
 
-## How it works
+1. `cd contract && npm install && npm test` -> see `15 passed` (policy logic).
+2. `cd ../checker && npm install && npm test` -> see `10 passed` (receiver scoring).
+3. `cd ../agent && npm install && npm test` -> see `7 passed` (wrapper: refuses on block, asks a human on warn).
 
-- `policy.py`: `Policy` (rules, loaded from JSON) and `Guard.check(receiver, amount)` which returns a `Decision(allowed, reason, ...)`. Checks run in order: amount valid, blocklist, allowlist, per-transaction cap, rolling 24h cap.
-- `demo.py`: a scripted agent that attempts normal, buggy, injected and scam payments.
-- `policy.json`: the rules.
+**B. Read the live contract (no keys needed)**
 
-## NEAR usage
+1. `near contract call-function as-read-only guard-leash7.testnet getPolicy json-args {} network-config testnet now` -> see the limits and the authorized agent.
+2. `near contract call-function as-read-only guard-leash7.testnet getLog json-args {} network-config testnet now` -> see the on-chain audit log of allowed and blocked payments.
 
-Planned: payments execute on NEAR testnet only after the guard allows them, using a function call key with limited allowance so the agent cannot bypass the guard. This section will list exactly what is used once built.
+**C. Run the attack demo (needs your own deployment and keys; see `agent/DEPLOY.md`)**
+
+1. `cd agent && npx tsx src/demo.ts`
+2. See: a normal payment `PAID`; a prompt-injected payment to an unknown account `STOPPED` by the checker; a reported scammer `STOPPED`; a 50 NEAR payment sent straight to the contract `STOPPED` by the guard ("exceeds per-transaction cap"); a direct transfer from the agent account `REJECTED` by the NEAR protocol.
+
+## NEAR features used
+
+- Function-call access keys (agent key scoped to one contract and one method)
+- Smart contract on testnet (near-sdk-js) that holds funds and transfers via promises
+- NEAR JSON-RPC for receiver checks (`view_account`, contract view calls)
+- near-api-js for signing the agent's calls
+
+## Known limits (honest)
+
+- Account age, transaction history and code-change recency are **not collected** in this version (they need an indexer). The scorer supports them; the signal collector leaves them empty.
+- The contract's spendable balance excludes NEAR locked for its own storage.
+- A function-call-only account cannot transfer NEAR or add keys, and it can lock itself out if the key's gas allowance runs out. Top up the allowance from the owner.
+- Testnet only. No Intents integration (Intents has no testnet).
+
+## Repository layout
+
+- `contract/` guard contract and its tests
+- `checker/` receiver scoring (pure logic) and tests
+- `agent/` RPC reader, wrapper, signing, key generator, attack demo
+- `policy.py`, `demo.py`, `test_policy.py` early offline Python prototype of the policy rules (reference only)
 
 ## License
 

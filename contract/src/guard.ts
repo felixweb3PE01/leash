@@ -105,7 +105,7 @@ export class Guard {
       receiver,
       amount: BigInt(amount),
       now,
-      balance: near.accountBalance(),
+      balance: this.spendableBalance(),
     });
 
     // Denials return normally (not a panic) so the audit log is kept on-chain.
@@ -156,6 +156,14 @@ export class Guard {
   }
 
   // ---- helpers -------------------------------------------------------------
+
+  // Total balance minus the NEAR locked to pay for this contract's storage
+  // (1 byte = 1e19 yoctoNEAR). Using the raw balance would over-count funds.
+  private spendableBalance(): bigint {
+    const locked = near.storageUsage() * 10_000_000_000_000_000_000n;
+    const total = near.accountBalance();
+    return total > locked ? total - locked : 0n;
+  }
 
   private policy(): Policy {
     return {

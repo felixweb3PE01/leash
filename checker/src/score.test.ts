@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { scoreReceiver, Signals } from "./score";
 
 const base: Signals = {
+  exists: true,
+  lookupFailed: false,
   accountAgeDays: 400,
   txCount: 500,
   isContract: false,
@@ -49,36 +51,40 @@ describe("scoreReceiver", () => {
     expect(r.reasons.join(" ")).toContain("no evidence");
   });
 
-  it("warns on a brand-new account with no history", () => {
-    const r = scoreReceiver({ ...base, accountAgeDays: 0.2, txCount: 0 });
+  it("blocks an account that does not exist", () => {
+    const r = scoreReceiver({ ...base, exists: false });
+    expect(r.verdict).toBe("block");
+    expect(r.reasons).toContain("account does not exist on-chain");
+  });
+
+  it("warns when the account cannot be verified at all", () => {
+    const r = scoreReceiver({ ...base, lookupFailed: true });
     expect(r.verdict).toBe("warn");
+    expect(r.reasons).toContain("could not verify the account on-chain");
+  });
+
+  it("warns on an account created less than a day ago", () => {
+    const r = scoreReceiver({ ...base, accountAgeDays: 0.2 });
+    expect(r.verdict).toBe("warn");
+  });
+
+  it("does not penalise txCount when it was not collected", () => {
+    const r = scoreReceiver({ ...base, txCount: null });
+    expect(r.verdict).toBe("allow");
   });
 
   it("blocks a new contract whose code just changed", () => {
     const r = scoreReceiver({
       ...base,
       accountAgeDays: 0.5,
-      txCount: 1,
       isContract: true,
       codeChangedDaysAgo: 0,
     });
     expect(r.verdict).toBe("block");
   });
 
-  it("treats unavailable history as risky, not safe", () => {
-    const r = scoreReceiver({ ...base, accountAgeDays: null, txCount: null });
-    expect(r.verdict).toBe("allow"); // 20 risk alone stays under warn
-    expect(r.risk).toBe(20);
-    expect(r.reasons).toContain("account history unavailable");
-  });
-
   it("prior payments reduce risk but never beat an evidenced report", () => {
-    const trusted = scoreReceiver({
-      ...base,
-      accountAgeDays: 3,
-      txCount: 2,
-      priorInteractions: 5,
-    });
+    const trusted = scoreReceiver({ ...base, accountAgeDays: 3, priorInteractions: 5 });
     const reported = scoreReceiver({
       ...base,
       priorInteractions: 5,

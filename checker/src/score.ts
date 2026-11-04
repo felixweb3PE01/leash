@@ -1,6 +1,6 @@
 // Counterparty scoring: pure logic, no network.
-// Signals are gathered elsewhere (RPC / indexer / our contract) and passed in,
-// so this file is deterministic and fully unit-testable.
+// Signals are gathered elsewhere (RPC / our contract) and passed in, so this
+// file is deterministic and fully unit-testable.
 
 export type Verdict = "allow" | "warn" | "block";
 
@@ -10,11 +10,13 @@ export interface BlocklistReport {
 }
 
 export interface Signals {
-  accountAgeDays: number | null; // null = unknown (could not fetch)
-  txCount: number | null;
+  exists: boolean; // does the receiver account exist on-chain
+  lookupFailed: boolean; // true if we could not verify the account at all
+  accountAgeDays: number | null; // null = could not be determined
+  txCount: number | null; // null = not collected (no penalty)
   isContract: boolean;
   codeChangedDaysAgo: number | null; // only meaningful if isContract
-  priorInteractions: number; // payments from this agent to this receiver before
+  priorInteractions: number; // successful payments from this agent before
   blocklistReports: BlocklistReport[];
 }
 
@@ -24,8 +26,8 @@ export interface Result {
   reasons: string[];
 }
 
-const WARN_AT = 30;
-const BLOCK_AT = 60;
+export const WARN_AT = 30;
+export const BLOCK_AT = 60;
 
 export function scoreReceiver(s: Signals): Result {
   let risk = 0;
@@ -46,30 +48,33 @@ export function scoreReceiver(s: Signals): Result {
     reasons.push(`${unevidenced} report(s) ignored: no evidence attached`);
   }
 
-  if (s.accountAgeDays === null || s.txCount === null) {
-    risk += 20;
-    reasons.push("account history unavailable");
+  if (s.lookupFailed) {
+    risk += 35;
+    reasons.push("could not verify the account on-chain");
+  } else if (!s.exists) {
+    risk += 70;
+    reasons.push("account does not exist on-chain");
   } else {
-    if (s.accountAgeDays < 1) {
+    // accountAgeDays null = not collected (needs an indexer): no penalty.
+    if (s.accountAgeDays !== null && s.accountAgeDays < 1) {
       risk += 30;
       reasons.push("account created less than a day ago");
-    } else if (s.accountAgeDays < 7) {
+    } else if (s.accountAgeDays !== null && s.accountAgeDays < 7) {
       risk += 15;
       reasons.push("account less than a week old");
     }
-    if (s.txCount < 3) {
+    if (s.txCount !== null && s.txCount < 3) {
       risk += 15;
       reasons.push("almost no activity history");
     }
-  }
-
-  if (s.isContract) {
-    if (s.codeChangedDaysAgo !== null && s.codeChangedDaysAgo < 3) {
-      risk += 35;
-      reasons.push("contract code changed in the last 3 days");
-    } else if (s.codeChangedDaysAgo === null) {
-      risk += 10;
-      reasons.push("contract code history unavailable");
+    if (s.isContract) {
+      if (s.codeChangedDaysAgo !== null && s.codeChangedDaysAgo < 3) {
+        risk += 35;
+        reasons.push("contract code changed in the last 3 days");
+      } else if (s.codeChangedDaysAgo === null) {
+        risk += 10;
+        reasons.push("contract code history unavailable");
+      }
     }
   }
 
