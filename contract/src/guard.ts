@@ -10,7 +10,7 @@ import {
   Report,
   SpendEntry,
   addReport,
-  dismissReport,
+  dismissReport as removeReport,
   MIN_STAKE,
   decide,
   evidencedReports,
@@ -142,7 +142,7 @@ export class Guard {
   @call({})
   dismissReport({ account, reporter }: { account: string; reporter: string }): void {
     this.onlyOwner();
-    this.reports[account] = dismissReport(this.reports[account] ?? [], reporter);
+    this.reports[account] = removeReport(this.reports[account] ?? [], reporter);
   }
 
   // ---- views ---------------------------------------------------------------
