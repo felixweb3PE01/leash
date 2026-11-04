@@ -7,6 +7,7 @@ export type Verdict = "allow" | "warn" | "block";
 export interface BlocklistReport {
   reporter: string;
   evidence: string; // link or tx hash; empty string means no evidence
+  staked?: boolean; // paid the report fee; false = does not count (default: counts)
 }
 
 export interface Signals {
@@ -35,7 +36,7 @@ export function scoreReceiver(s: Signals): Result {
 
   // Evidence-backed reports are the strongest signal. Reports with no evidence
   // are ignored so the blocklist can't be used to smear accounts for free.
-  const evidenced = s.blocklistReports.filter((r) => r.evidence.trim() !== "");
+  const evidenced = s.blocklistReports.filter((r) => r.evidence.trim() !== "" && r.staked !== false);
   const unevidenced = s.blocklistReports.length - evidenced.length;
   if (evidenced.length >= 2) {
     risk += 100;
@@ -45,7 +46,7 @@ export function scoreReceiver(s: Signals): Result {
     reasons.push("reported once with evidence");
   }
   if (unevidenced > 0) {
-    reasons.push(`${unevidenced} report(s) ignored: no evidence attached`);
+    reasons.push(`${unevidenced} report(s) ignored: no evidence or no report fee paid`);
   }
 
   if (s.lookupFailed) {

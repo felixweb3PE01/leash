@@ -51,6 +51,18 @@ describe("scoreReceiver", () => {
     expect(r.reasons.join(" ")).toContain("no evidence");
   });
 
+  it("ignores reports whose fee was not paid", () => {
+    const r = scoreReceiver({
+      ...base,
+      blocklistReports: [
+        { reporter: "a.testnet", evidence: "tx:1", staked: false },
+        { reporter: "b.testnet", evidence: "tx:2", staked: false },
+      ],
+    });
+    expect(r.verdict).toBe("allow");
+    expect(r.reasons.join(" ")).toContain("no report fee");
+  });
+
   it("blocks an account that does not exist", () => {
     const r = scoreReceiver({ ...base, exists: false });
     expect(r.verdict).toBe("block");

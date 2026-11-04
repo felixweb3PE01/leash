@@ -29,11 +29,21 @@ export function makeRpc(url: string = DEFAULT_RPC): Rpc {
 
 const ZERO_HASH = "11111111111111111111111111111111";
 
-export async function viewAccount(rpc: Rpc, accountId: string): Promise<AccountView> {
+export async function latestHeight(rpc: Rpc): Promise<number> {
+  const r: any = await rpc("block", { finality: "final" });
+  return Number(r.header.height);
+}
+
+// blockId = a block height to look at the past; omit for the latest state.
+export async function viewAccount(
+  rpc: Rpc,
+  accountId: string,
+  blockId?: number,
+): Promise<AccountView> {
   try {
     const r: any = await rpc("query", {
       request_type: "view_account",
-      finality: "final",
+      ...(blockId === undefined ? { finality: "final" } : { block_id: blockId }),
       account_id: accountId,
     });
     const has = r.code_hash && r.code_hash !== ZERO_HASH;

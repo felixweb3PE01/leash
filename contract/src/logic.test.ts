@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { decide, addReport, pruneSpends, DAY_NS, RESERVE, Policy } from "./logic";
+import { decide, addReport, dismissReport, pruneSpends, DAY_NS, RESERVE, MIN_STAKE, Policy } from "./logic";
+
+const S = MIN_STAKE.toString();
 
 const N = 1_000_000_000_000_000_000_000_000n; // 1 NEAR in yocto
 const policy: Policy = {
@@ -35,8 +37,8 @@ describe("decide", () => {
     const d = decide({
       ...base,
       reportsForReceiver: [
-        { reporter: "a.testnet", evidence: "tx:1" },
-        { reporter: "b.testnet", evidence: "tx:2" },
+        { reporter: "a.testnet", evidence: "tx:1", stake: S },
+        { reporter: "b.testnet", evidence: "tx:2", stake: S },
       ],
     });
     expect(d.ok).toBe(false);
@@ -79,19 +81,56 @@ describe("decide", () => {
 
 describe("addReport", () => {
   it("requires evidence", () => {
-    expect(addReport([], "a.testnet", "  ").error).toBeDefined();
+    expect(addReport([], "a.testnet", "  ", MIN_STAKE).error).toBeDefined();
   });
-  it("rejects duplicate reporters", () => {
-    const r = addReport([], "a.testnet", "tx:1").reports;
-    expect(addReport(r, "a.testnet", "tx:2").error).toBeDefined();
+  it("requires the report fee", () => {
+    expect(addReport([], "a.testnet", "tx:1", MIN_STAKE - 1n).error).toContain("fee");
+    expect(addReport([], "a.testnet", "tx:1", 0n).error).toContain("fee");
   });
-  it("rejects over-long evidence", () => {
-    expect(addReport([], "a.testnet", "x".repeat(301)).error).toBeDefined();
+  it("rejects duplicate paying reporters", () => {
+    const r = addReport([], "a.testnet", "tx:1", MIN_STAKE).reports;
+    expect(addReport(r, "a.testnet", "tx:2", MIN_STAKE).error).toBeDefined();
   });
-  it("accepts valid reports", () => {
-    const res = addReport([], "a.testnet", "tx:1");
+  it("replaces an old unstaked report from the same account", () => {
+    const legacy = [{ reporter: "a.testnet", evidence: "old" }];
+    const res = addReport(legacy, "a.testnet", "tx:new", MIN_STAKE);
     expect(res.error).toBeUndefined();
     expect(res.reports).toHaveLength(1);
+    expect(res.reports[0].evidence).toBe("tx:new");
+  });
+  it("rejects over-long evidence", () => {
+    expect(addReport([], "a.testnet", "x".repeat(301), MIN_STAKE).error).toBeDefined();
+  });
+  it("accepts valid reports and records the stake", () => {
+    const res = addReport([], "a.testnet", "tx:1", MIN_STAKE);
+    expect(res.error).toBeUndefined();
+    expect(res.reports[0].stake).toBe(S);
+  });
+});
+
+describe("community block needs paid reports", () => {
+  const two = (stake?: string) => [
+    { reporter: "a.testnet", evidence: "tx:1", stake },
+    { reporter: "b.testnet", evidence: "tx:2", stake },
+  ];
+  it("blocks on two paid reports", () => {
+    expect(decide({ ...base, reportsForReceiver: two(S) }).ok).toBe(false);
+  });
+  it("does not block on reports with no fee (legacy or sybil)", () => {
+    expect(decide({ ...base, reportsForReceiver: two(undefined) }).ok).toBe(true);
+    expect(decide({ ...base, reportsForReceiver: two("1") }).ok).toBe(true);
+  });
+});
+
+describe("dismissReport", () => {
+  it("removes only that reporter's report", () => {
+    const r = [
+      { reporter: "a.testnet", evidence: "x", stake: S },
+      { reporter: "b.testnet", evidence: "y", stake: S },
+    ];
+    const out = dismissReport(r, "a.testnet");
+    expect(out).toHaveLength(1);
+    expect(out[0].reporter).toBe("b.testnet");
   });
 });
 

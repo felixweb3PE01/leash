@@ -12,5 +12,6 @@ You need `near-cli-rs` (`npm install -g near-cli-rs`), Node 22+, and testnet acc
    `near account add-key AGENT grant-function-call-access --allowance '2 NEAR' --contract-account-id GUARD --function-names pay use-manually-provided-public-key PUBLIC_KEY network-config testnet sign-with-keychain send`
 8. Remove the agent's original full-access key so only the restricted key remains:
    `near account delete-key AGENT public-key OLD_FULL_ACCESS_KEY network-config testnet sign-with-keychain send`
-9. Report the scammer twice with evidence from two different accounts (`report` with `{"account","evidence"}`).
+9. Report the scammer from two different accounts. Each report must attach the 0.1 NEAR fee:
+   `near contract call-function as-transaction GUARD report json-args '{"account":"SCAMMER","evidence":"your evidence"}' prepaid-gas '30.0 Tgas' attached-deposit '0.1 NEAR' sign-as REPORTER network-config testnet sign-with-keychain send`
 10. Run `npx tsx src/demo.ts`.

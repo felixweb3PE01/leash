@@ -10,6 +10,8 @@ import {
   Report,
   SpendEntry,
   addReport,
+  dismissReport,
+  MIN_STAKE,
   decide,
   evidencedReports,
   pruneSpends,
@@ -120,19 +122,35 @@ export class Guard {
 
   // ---- shared blocklist: anyone can report, but evidence is required ------
 
-  @call({})
+  // Payable: the attached deposit is the report fee (kept by the guard as
+  // spam/sybil protection). If the report is rejected the transaction fails
+  // and the deposit is returned automatically.
+  @call({ payableFunction: true })
   report({ account, evidence }: { account: string; evidence: string }): void {
     assert(validateAccountId(account), "invalid account");
-    const res = addReport(this.reports[account] ?? [], near.predecessorAccountId(), evidence);
+    const res = addReport(
+      this.reports[account] ?? [],
+      near.predecessorAccountId(),
+      evidence,
+      near.attachedDeposit(),
+    );
     assert(!res.error, res.error ?? "");
     this.reports[account] = res.reports;
+  }
+
+  // Owner removes a bad-faith report. The fee stays with the guard.
+  @call({})
+  dismissReport({ account, reporter }: { account: string; reporter: string }): void {
+    this.onlyOwner();
+    this.reports[account] = dismissReport(this.reports[account] ?? [], reporter);
   }
 
   // ---- views ---------------------------------------------------------------
 
   @view({})
-  getPolicy(): Policy & { owner: string; agents: string[]; spentToday: string } {
+  getPolicy(): Policy & { owner: string; agents: string[]; spentToday: string; minStake: string } {
     return {
+      minStake: MIN_STAKE.toString(),
       owner: this.owner,
       agents: this.agents,
       spentToday: spentInWindow(this.spends, near.blockTimestamp()).toString(),

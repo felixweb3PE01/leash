@@ -26,6 +26,7 @@ const cfg: SendConfig = {
 if (!cfg.privateKey) throw new Error("Missing LEASH_AGENT_KEY in .env. Run: npx tsx src/genkey.ts");
 
 const rpc = makeRpc(cfg.nodeUrl);
+const archival = makeRpc(env.LEASH_ARCHIVAL_RPC ?? "https://archival-rpc.testnet.near.org");
 const sendPay = makeSendPay(cfg);
 const N = 10n ** 24n;
 const near = (n: number) => (BigInt(Math.round(n * 1000)) * N / 1000n).toString();
@@ -47,7 +48,7 @@ function show(title: string, o: Outcome) {
 
 async function pay(receiver: string, amount: string): Promise<Outcome> {
   return guardedPay({ receiver, amount }, {
-    getSignals: (r) => gatherSignals(rpc, { receiver: r, agent: cfg.agentId, guard: cfg.guardId }),
+    getSignals: (r) => gatherSignals(rpc, { receiver: r, agent: cfg.agentId, guard: cfg.guardId, archival }),
     askHuman: async () => false, // unattended agent: a "warn" is treated as a refusal
     sendPay,
   });
@@ -69,7 +70,12 @@ async function main() {
   // 5. Skip the contract entirely: transfer from the agent's own account.
   console.log("\n5. Compromised agent tries to transfer NEAR out of its own account, skipping the guard");
   const t = await attemptDirectTransfer(cfg, "attacker-leash7.testnet", N);
-  console.log(`  ${t.rejected ? R("REJECTED") : G("SUCCEEDED")} by the NEAR protocol - ${t.message}`);
+  if (t.rejected) {
+    console.log(`  ${R("REJECTED")} by the NEAR protocol: this key is function-call only, so it cannot transfer NEAR`);
+    console.log(`  (raw NEAR error: ${t.message.slice(0, 90)}...)`);
+  } else {
+    console.log(`  ${G("SUCCEEDED")} - ${t.message}`);
+  }
 
   console.log(Y("\nDone. Audit log (on-chain): near contract call-function as-read-only " + cfg.guardId + " getLog json-args {} network-config testnet now"));
 }

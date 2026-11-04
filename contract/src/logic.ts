@@ -5,9 +5,15 @@ export const DAY_NS = 86_400_000_000_000n;
 export const BLOCK_THRESHOLD = 2; // evidenced reports needed for a community block
 export const RESERVE = 1_000_000_000_000_000_000_000_000n; // keep 1 NEAR for storage
 
+// A report must carry a fee (stake) of at least MIN_STAKE to count. Fake-report
+// campaigns therefore cost real money. Reports from before this rule have no
+// stake and do not count.
+export const MIN_STAKE = 100_000_000_000_000_000_000_000n; // 0.1 NEAR
+
 export interface Report {
   reporter: string;
   evidence: string;
+  stake?: string; // yoctoNEAR attached when reporting
 }
 
 export interface SpendEntry {
@@ -27,8 +33,12 @@ export interface Decision {
   reason: string;
 }
 
+export function countsAsReport(r: Report): boolean {
+  return r.evidence.trim() !== "" && BigInt(r.stake ?? "0") >= MIN_STAKE;
+}
+
 export function evidencedReports(reports: Report[]): Report[] {
-  return reports.filter((r) => r.evidence.trim() !== "");
+  return reports.filter(countsAsReport);
 }
 
 export function pruneSpends(spends: SpendEntry[], now: bigint): SpendEntry[] {
@@ -81,12 +91,23 @@ export function addReport(
   existing: Report[],
   reporter: string,
   evidence: string,
+  stake: bigint,
 ): { reports: Report[]; error?: string } {
   if (evidence.trim() === "") return { reports: existing, error: "evidence is required" };
   if (evidence.length > 300) return { reports: existing, error: "evidence too long (max 300)" };
-  if (existing.some((r) => r.reporter === reporter)) {
+  if (stake < MIN_STAKE) {
+    return { reports: existing, error: "a report fee of at least 0.1 NEAR must be attached" };
+  }
+  const mine = existing.find((r) => r.reporter === reporter);
+  if (mine && countsAsReport(mine)) {
     return { reports: existing, error: "this account already reported the target" };
   }
-  if (existing.length >= 20) return { reports: existing, error: "report limit reached" };
-  return { reports: [...existing, { reporter, evidence }] };
+  // An old report from the same account (made before fees existed) is replaced.
+  const others = existing.filter((r) => r.reporter !== reporter);
+  if (others.length >= 20) return { reports: existing, error: "report limit reached" };
+  return { reports: [...others, { reporter, evidence, stake: stake.toString() }] };
+}
+
+export function dismissReport(existing: Report[], reporter: string): Report[] {
+  return existing.filter((r) => r.reporter !== reporter);
 }
